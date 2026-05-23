@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { FileInfo } from '../../../shared/types';
-import { wsService } from '../../../services/websocket';
+import { FileInfo } from '../../shared/types';
+import { wsService } from '../../services/websocket';
 
 interface SidebarProps {
   onFileOpen: (path: string) => void;
@@ -18,7 +18,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ onFileOpen, currentFile }) => 
 
   const loadFiles = async () => {
     try {
-      const response = await fetch('http://localhost:8090/api/files');
+      const response = await fetch('http://127.0.0.1:8090/api/files');
       const data = await response.json();
       setFiles(data || []);
     } catch (error) {
@@ -28,7 +28,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ onFileOpen, currentFile }) => 
 
   const loadSessions = async () => {
     try {
-      const response = await fetch('http://localhost:8090/api/sessions');
+      const response = await fetch('http://127.0.0.1:8090/api/sessions');
       const data = await response.json();
       setSessions(data || []);
     } catch (error) {

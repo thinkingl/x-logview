@@ -1,19 +1,17 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { FileInfo, ReadResult, SearchResult } from '../../../shared/types';
-import { wsService } from '../../../services/websocket';
+import { FileInfo, ReadResult, SearchResult } from '../../shared/types';
+import { wsService } from '../../services/websocket';
 
 interface EditorProps {
   file: FileInfo | null;
   onTextSelect: (text: string) => void;
-  onToggleSidebar: () => void;
-  onToggleRightPanel: () => void;
+  onFileModified?: (modified: boolean) => void;
 }
 
 export const Editor: React.FC<EditorProps> = ({
   file,
   onTextSelect,
-  onToggleSidebar,
-  onToggleRightPanel,
+  onFileModified,
 }) => {
   const [lines, setLines] = useState<string[]>([]);
   const [totalLines, setTotalLines] = useState<number>(0);
@@ -343,12 +341,6 @@ export const Editor: React.FC<EditorProps> = ({
   return (
     <div className="editor-container" onKeyDown={handleKeyDown}>
       <div className="editor-toolbar">
-        <button className="toolbar-button" onClick={onToggleSidebar}>
-          ☰
-        </button>
-        <button className="toolbar-button" onClick={onToggleRightPanel}>
-          ☰
-        </button>
         <button
           className={`toolbar-button ${followMode ? 'active' : ''}`}
           onClick={() => setFollowMode(!followMode)}

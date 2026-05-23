@@ -1,5 +1,5 @@
 import React from 'react';
-import { FileInfo } from '../../../shared/types';
+import { FileInfo } from '../../shared/types';
 
 interface StatusBarProps {
   file: FileInfo | null;

@@ -1,5 +1,5 @@
 import React, { useMemo } from 'react';
-import { FileInfo } from '../../../shared/types';
+import { FileInfo } from '../../shared/types';
 
 interface RightPanelProps {
   selectedText: string;

@@ -7,49 +7,74 @@ export class WebSocketService {
   private url: string;
   private handlers: Map<string, MessageHandler[]> = new Map();
   private reconnectAttempts = 0;
-  private maxReconnectAttempts = 5;
-  private reconnectDelay = 1000;
+  private maxReconnectAttempts = 10;
+  private reconnectDelay = 2000;
+  private isConnecting = false;
+  private shouldReconnect = true;
 
-  constructor(url: string = 'ws://localhost:8090/ws') {
+  constructor(url: string = 'ws://127.0.0.1:8090/ws') {
     this.url = url;
   }
 
   connect(): Promise<void> {
+    if (this.isConnecting) {
+      return Promise.resolve();
+    }
+
+    this.isConnecting = true;
+
     return new Promise((resolve, reject) => {
-      this.ws = new WebSocket(this.url);
+      try {
+        this.ws = new WebSocket(this.url);
 
-      this.ws.onopen = () => {
-        console.log('WebSocket connected');
-        this.reconnectAttempts = 0;
-        resolve();
-      };
+        this.ws.onopen = () => {
+          console.log('WebSocket connected');
+          this.reconnectAttempts = 0;
+          this.isConnecting = false;
+          resolve();
+        };
 
-      this.ws.onmessage = (event) => {
-        try {
-          const msg: WebSocketMessage = JSON.parse(event.data);
-          this.handleMessage(msg);
-        } catch (e) {
-          console.error('Failed to parse message:', e);
-        }
-      };
+        this.ws.onmessage = (event) => {
+          try {
+            const msg: WebSocketMessage = JSON.parse(event.data);
+            this.handleMessage(msg);
+          } catch (e) {
+            console.error('Failed to parse message:', e);
+          }
+        };
 
-      this.ws.onclose = () => {
-        console.log('WebSocket closed');
-        this.attemptReconnect();
-      };
+        this.ws.onclose = () => {
+          console.log('WebSocket closed');
+          this.isConnecting = false;
+          if (this.shouldReconnect) {
+            this.attemptReconnect();
+          }
+        };
 
-      this.ws.onerror = (error) => {
-        console.error('WebSocket error:', error);
+        this.ws.onerror = (error) => {
+          console.error('WebSocket error:', error);
+          this.isConnecting = false;
+          // 不 reject，让 onclose 处理重连
+        };
+      } catch (error) {
+        this.isConnecting = false;
         reject(error);
-      };
+      }
     });
   }
 
   disconnect() {
+    this.shouldReconnect = false;
     if (this.ws) {
       this.ws.close();
       this.ws = null;
     }
+  }
+
+  reconnect() {
+    this.shouldReconnect = true;
+    this.reconnectAttempts = 0;
+    this.connect().catch(() => {});
   }
 
   send(type: string, payload: any): Promise<WebSocketMessage> {
@@ -111,10 +136,15 @@ export class WebSocketService {
   private attemptReconnect() {
     if (this.reconnectAttempts < this.maxReconnectAttempts) {
       this.reconnectAttempts++;
+      const delay = Math.min(this.reconnectDelay * this.reconnectAttempts, 30000);
+      console.log(`Attempting to reconnect (${this.reconnectAttempts}/${this.maxReconnectAttempts}) in ${delay}ms...`);
       setTimeout(() => {
-        console.log(`Attempting to reconnect (${this.reconnectAttempts}/${this.maxReconnectAttempts})...`);
-        this.connect().catch(() => {});
-      }, this.reconnectDelay * this.reconnectAttempts);
+        if (this.shouldReconnect) {
+          this.connect().catch(() => {});
+        }
+      }, delay);
+    } else {
+      console.error('Max reconnect attempts reached');
     }
   }
 

@@ -156,6 +156,16 @@ func (fs *FileService) Read(path string, req ReadRequest) (*ReadResult, error) {
 		endOffset = h.info.Size
 	}
 
+	if startOffset >= endOffset {
+		return &ReadResult{
+			Lines:      []string{},
+			StartLine:  req.StartLine,
+			EndLine:    req.StartLine,
+			TotalLines: -1,
+			HasMore:    false,
+		}, nil
+	}
+
 	data := make([]byte, endOffset-startOffset)
 	_, err := h.file.ReadAt(data, startOffset)
 	if err != nil && err != io.EOF {

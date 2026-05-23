@@ -2,6 +2,8 @@ package encoding
 
 import (
 	"bytes"
+	"io"
+	"strings"
 	"testing"
 )
 
@@ -66,6 +68,105 @@ func TestDetectEncoding(t *testing.T) {
 	}
 }
 
+func TestIsGBK(t *testing.T) {
+	tests := []struct {
+		name     string
+		data     []byte
+		expected bool
+	}{
+		{
+			name:     "GBK数据",
+			data:     []byte{0xC4, 0xE3, 0xBA, 0xC3}, // 你好 GBK
+			expected: true,
+		},
+		{
+			name:     "纯ASCII",
+			data:     []byte("Hello"),
+			expected: false,
+		},
+		{
+			name:     "空数据",
+			data:     []byte{},
+			expected: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := isGBK(tt.data)
+			if result != tt.expected {
+				t.Errorf("isGBK() = %v, want %v", result, tt.expected)
+			}
+		})
+	}
+}
+
+func TestIsBig5(t *testing.T) {
+	tests := []struct {
+		name     string
+		data     []byte
+		expected bool
+	}{
+		{
+			name:     "Big5数据",
+			data:     []byte{0xA4, 0xA4, 0xA4, 0xE5}, // 你好 Big5
+			expected: true,
+		},
+		{
+			name:     "纯ASCII",
+			data:     []byte("Hello"),
+			expected: false,
+		},
+		{
+			name:     "空数据",
+			data:     []byte{},
+			expected: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := isBig5(tt.data)
+			if result != tt.expected {
+				t.Errorf("isBig5() = %v, want %v", result, tt.expected)
+			}
+		})
+	}
+}
+
+func TestIsShiftJIS(t *testing.T) {
+	tests := []struct {
+		name     string
+		data     []byte
+		expected bool
+	}{
+		{
+			name:     "ShiftJIS数据",
+			data:     []byte{0x82, 0xA0, 0x82, 0xA2}, // あい ShiftJIS
+			expected: true,
+		},
+		{
+			name:     "纯ASCII",
+			data:     []byte("Hello"),
+			expected: false,
+		},
+		{
+			name:     "空数据",
+			data:     []byte{},
+			expected: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := isShiftJIS(tt.data)
+			if result != tt.expected {
+				t.Errorf("isShiftJIS() = %v, want %v", result, tt.expected)
+			}
+		})
+	}
+}
+
 func TestConvertEncoding(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -101,6 +202,115 @@ func TestConvertEncoding(t *testing.T) {
 			}
 			if !tt.wantErr && result == nil {
 				t.Error("ConvertEncoding() returned nil result")
+			}
+		})
+	}
+}
+
+func TestConvertEncodingUTF8ToGBK(t *testing.T) {
+	data := []byte("Hello")
+	result, err := ConvertEncoding(data, UTF8, GBK)
+	if err != nil {
+		t.Fatalf("ConvertEncoding() error = %v", err)
+	}
+	if result == nil {
+		t.Error("ConvertEncoding() returned nil result")
+	}
+	if len(result) == 0 {
+		t.Error("ConvertEncoding() returned empty result")
+	}
+}
+
+func TestConvertEncodingGBKToUTF8(t *testing.T) {
+	// GBK "你好"
+	data := []byte{0xC4, 0xE3, 0xBA, 0xC3}
+	result, err := ConvertEncoding(data, GBK, UTF8)
+	if err != nil {
+		t.Fatalf("ConvertEncoding() error = %v", err)
+	}
+	if result == nil {
+		t.Error("ConvertEncoding() returned nil result")
+	}
+	expected := "你好"
+	if string(result) != expected {
+		t.Errorf("ConvertEncoding() = %v, want %v", string(result), expected)
+	}
+}
+
+func TestConvertEncodingUTF16ToUTF8(t *testing.T) {
+	// UTF-16 LE "Hello"
+	data := []byte{0x48, 0x00, 0x65, 0x00, 0x6C, 0x00, 0x6C, 0x00, 0x6F, 0x00}
+	result, err := ConvertEncoding(data, UTF16LE, UTF8)
+	if err != nil {
+		t.Fatalf("ConvertEncoding() error = %v", err)
+	}
+	if string(result) != "Hello" {
+		t.Errorf("ConvertEncoding() = %v, want Hello", string(result))
+	}
+}
+
+func TestConvertEncodingUTF8ToUTF8BOM(t *testing.T) {
+	data := []byte("Hello")
+	result, err := ConvertEncoding(data, UTF8, UTF8BOM)
+	if err != nil {
+		t.Fatalf("ConvertEncoding() error = %v", err)
+	}
+	if !bytes.HasPrefix(result, []byte{0xEF, 0xBB, 0xBF}) {
+		t.Error("ConvertEncoding() result should have BOM prefix")
+	}
+	if string(result[3:]) != "Hello" {
+		t.Errorf("ConvertEncoding() content = %v, want Hello", string(result[3:]))
+	}
+}
+
+func TestConvertEncodingUTF8BOMToUTF8(t *testing.T) {
+	data := []byte{0xEF, 0xBB, 0xBF, 0x48, 0x65, 0x6C, 0x6C, 0x6F}
+	result, err := ConvertEncoding(data, UTF8BOM, UTF8)
+	if err != nil {
+		t.Fatalf("ConvertEncoding() error = %v", err)
+	}
+	if string(result) != "Hello" {
+		t.Errorf("ConvertEncoding() = %v, want Hello", string(result))
+	}
+}
+
+func TestNewDecodedReader(t *testing.T) {
+	tests := []struct {
+		name string
+		data string
+		enc  EncodingType
+	}{
+		{
+			name: "UTF-8 Reader",
+			data: "Hello World",
+			enc:  UTF8,
+		},
+		{
+			name: "GBK Reader",
+			data: "Hello World",
+			enc:  GBK,
+		},
+		{
+			name: "UTF-16 LE Reader",
+			data: "Hello World",
+			enc:  UTF16LE,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			reader := strings.NewReader(tt.data)
+			decoded := NewDecodedReader(reader, tt.enc)
+			if decoded == nil {
+				t.Error("NewDecodedReader() returned nil")
+			}
+
+			data, err := io.ReadAll(decoded)
+			if err != nil {
+				t.Errorf("ReadAll() error = %v", err)
+			}
+			if len(data) == 0 {
+				t.Error("ReadAll() returned empty data")
 			}
 		})
 	}
@@ -160,6 +370,74 @@ func TestUTF16Encoding(t *testing.T) {
 			result := encodeUTF16(tt.text, tt.littleEndian)
 			if !bytes.Equal(result, tt.expected) {
 				t.Errorf("encodeUTF16() = %v, want %v", result, tt.expected)
+			}
+		})
+	}
+}
+
+func TestDecodeBytes(t *testing.T) {
+	tests := []struct {
+		name     string
+		data     []byte
+		enc      EncodingType
+		expected string
+	}{
+		{
+			name:     "UTF-8 decode",
+			data:     []byte("Hello"),
+			enc:      UTF8,
+			expected: "Hello",
+		},
+		{
+			name:     "UTF-8 BOM decode",
+			data:     []byte{0xEF, 0xBB, 0xBF, 0x48, 0x65, 0x6C, 0x6C, 0x6F},
+			enc:      UTF8BOM,
+			expected: "Hello",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := decodeBytes(tt.data, tt.enc)
+			if err != nil {
+				t.Errorf("decodeBytes() error = %v", err)
+			}
+			if result != tt.expected {
+				t.Errorf("decodeBytes() = %v, want %v", result, tt.expected)
+			}
+		})
+	}
+}
+
+func TestEncodeBytes(t *testing.T) {
+	tests := []struct {
+		name     string
+		text     string
+		enc      EncodingType
+		expected []byte
+	}{
+		{
+			name:     "UTF-8 encode",
+			text:     "Hello",
+			enc:      UTF8,
+			expected: []byte("Hello"),
+		},
+		{
+			name:     "UTF-8 BOM encode",
+			text:     "Hello",
+			enc:      UTF8BOM,
+			expected: append([]byte{0xEF, 0xBB, 0xBF}, []byte("Hello")...),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := encodeBytes(tt.text, tt.enc)
+			if err != nil {
+				t.Errorf("encodeBytes() error = %v", err)
+			}
+			if !bytes.Equal(result, tt.expected) {
+				t.Errorf("encodeBytes() = %v, want %v", result, tt.expected)
 			}
 		})
 	}

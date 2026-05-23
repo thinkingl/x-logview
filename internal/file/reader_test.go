@@ -3,6 +3,7 @@ package file
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/x-logview/pkg/config"
@@ -133,6 +134,140 @@ func TestFileServiceRead(t *testing.T) {
 	fs.Close(path)
 }
 
+func TestFileServiceReadSample(t *testing.T) {
+	dir := t.TempDir()
+	content := "Hello World"
+	path := createTestFile(t, dir, "test.txt", content)
+
+	cfg := &config.BufferConfig{
+		ChunkSize: 4096,
+		MaxChunks: 1000,
+	}
+	fs := NewFileService(cfg)
+
+	fs.Open(path, func(info FileInfo) {})
+
+	sample, err := fs.ReadSample(path, 5)
+	if err != nil {
+		t.Fatalf("ReadSample() error = %v", err)
+	}
+	if sample == nil {
+		t.Error("ReadSample() returned nil")
+	}
+	if len(sample) != 5 {
+		t.Errorf("ReadSample() length = %v, want 5", len(sample))
+	}
+	if string(sample) != "Hello" {
+		t.Errorf("ReadSample() = %v, want Hello", string(sample))
+	}
+
+	fs.Close(path)
+}
+
+func TestFileServiceReadSampleNonexistent(t *testing.T) {
+	cfg := &config.BufferConfig{
+		ChunkSize: 4096,
+		MaxChunks: 1000,
+	}
+	fs := NewFileService(cfg)
+
+	_, err := fs.ReadSample("/nonexistent/file.txt", 100)
+	if err == nil {
+		t.Error("ReadSample() should return error for nonexistent file")
+	}
+}
+
+func TestFileServiceReadEmptyFile(t *testing.T) {
+	dir := t.TempDir()
+	path := createTestFile(t, dir, "empty.txt", "")
+
+	cfg := &config.BufferConfig{
+		ChunkSize: 4096,
+		MaxChunks: 1000,
+	}
+	fs := NewFileService(cfg)
+
+	fs.Open(path, func(info FileInfo) {})
+
+	result, err := fs.Read(path, ReadRequest{
+		StartLine: 0,
+		NumLines:  10,
+	})
+
+	if err != nil {
+		t.Fatalf("Read() error = %v", err)
+	}
+	if result == nil {
+		t.Error("Read() returned nil")
+	}
+
+	fs.Close(path)
+}
+
+func TestFileServiceReadLargeFile(t *testing.T) {
+	dir := t.TempDir()
+	var lines []string
+	for i := 0; i < 1000; i++ {
+		lines = append(lines, "Line "+string(rune('A'+i%26)))
+	}
+	content := strings.Join(lines, "\n")
+	path := createTestFile(t, dir, "large.txt", content)
+
+	cfg := &config.BufferConfig{
+		ChunkSize: 4096,
+		MaxChunks: 1000,
+	}
+	fs := NewFileService(cfg)
+
+	fs.Open(path, func(info FileInfo) {})
+
+	// Read first chunk
+	result1, err := fs.Read(path, ReadRequest{
+		StartLine: 0,
+		NumLines:  100,
+	})
+	if err != nil {
+		t.Fatalf("Read() error = %v", err)
+	}
+	if len(result1.Lines) == 0 {
+		t.Error("First read should return lines")
+	}
+
+	// Read from a position that doesn't exist
+	result2, err := fs.Read(path, ReadRequest{
+		StartLine: 200,
+		NumLines:  100,
+	})
+	if err != nil {
+		t.Fatalf("Read() error = %v", err)
+	}
+	// Should return empty lines or lines from file
+	_ = result2
+
+	fs.Close(path)
+}
+
+func TestFileServiceDuplicateOpen(t *testing.T) {
+	dir := t.TempDir()
+	path := createTestFile(t, dir, "test.txt", "Hello World")
+
+	cfg := &config.BufferConfig{
+		ChunkSize: 4096,
+		MaxChunks: 1000,
+	}
+	fs := NewFileService(cfg)
+
+	fs.Open(path, func(info FileInfo) {})
+	fs.Open(path, func(info FileInfo) {})
+
+	files := fs.ListOpenFiles()
+	if len(files) != 1 {
+		t.Errorf("ListOpenFiles() returned %v files, want 1", len(files))
+	}
+
+	fs.Close(path)
+}
+
 func TestFileServiceListOpenFiles(t *testing.T) {
 	dir := t.TempDir()
 	path1 := createTestFile(t, dir, "test1.txt", "File 1")
@@ -183,4 +318,33 @@ func TestFileTypeDetection(t *testing.T) {
 
 	fs.Close(textPath)
 	fs.Close(binaryPath)
+}
+
+func TestFileServiceReadNonexistent(t *testing.T) {
+	cfg := &config.BufferConfig{
+		ChunkSize: 4096,
+		MaxChunks: 1000,
+	}
+	fs := NewFileService(cfg)
+
+	_, err := fs.Read("/nonexistent/file.txt", ReadRequest{
+		StartLine: 0,
+		NumLines:  10,
+	})
+	if err == nil {
+		t.Error("Read() should return error for nonexistent file")
+	}
+}
+
+func TestFileServiceGetInfoNonexistent(t *testing.T) {
+	cfg := &config.BufferConfig{
+		ChunkSize: 4096,
+		MaxChunks: 1000,
+	}
+	fs := NewFileService(cfg)
+
+	_, ok := fs.GetInfo("/nonexistent/file.txt")
+	if ok {
+		t.Error("GetInfo() should return false for nonexistent file")
+	}
 }
