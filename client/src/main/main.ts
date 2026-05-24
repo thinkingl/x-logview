@@ -438,7 +438,12 @@ ipcMain.handle('save-file-as', async (_, content: string) => {
 });
 
 ipcMain.handle('get-app-path', () => {
-  return app.getPath('userData');
+  const userDataPath = app.getPath('userData');
+  // 同时保存到 localStorage 供前端使用
+  mainWindow?.webContents.executeJavaScript(`
+    localStorage.setItem('x-logview-user-data-path', '${userDataPath}');
+  `);
+  return userDataPath;
 });
 
 ipcMain.handle('check-backend', async () => {

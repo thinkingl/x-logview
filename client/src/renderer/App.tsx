@@ -82,6 +82,13 @@ function App() {
         .catch(console.error);
     }, 3000);
 
+    // 获取用户数据路径
+    if (window.electronAPI) {
+      window.electronAPI.getAppPath().then((path: string) => {
+        localStorage.setItem('x-logview-user-data-path', path);
+      });
+    }
+
     const handleBackendRestarted = () => {
       console.log('Backend restarted, reconnecting WebSocket...');
       wsService.reconnect();
@@ -189,7 +196,7 @@ function App() {
         console.log('Restoring open files:', filePaths);
         filePaths.forEach(path => {
           // 对于临时文件，创建新的临时文件标签
-          if (path.includes('/tmp/x-logview/temp/untitled-')) {
+          if (path.includes('.x-logview/temp/untitled-') || path.includes('/tmp/x-logview/temp/untitled-')) {
             const newTab: Tab = {
               id: `tab-${Date.now()}`,
               file: {
@@ -229,7 +236,9 @@ function App() {
   }, [handleFileOpen]);
 
   const handleNewFile = useCallback(() => {
-    const tempDir = '/tmp/x-logview/temp';
+    // 使用用户数据目录下的 temp 文件夹，避免重启丢失
+    const userDataPath = localStorage.getItem('x-logview-user-data-path') || '~/.x-logview';
+    const tempDir = `${userDataPath}/temp`;
     const fileName = `untitled-${Date.now()}.txt`;
     const filePath = `${tempDir}/${fileName}`;
     
