@@ -6,12 +6,14 @@ interface EditorProps {
   file: FileInfo | null;
   onTextSelect: (text: string) => void;
   onFileModified?: (modified: boolean) => void;
+  onContentChange?: (content: string) => void;
 }
 
 export const Editor: React.FC<EditorProps> = ({
   file,
   onTextSelect,
   onFileModified,
+  onContentChange,
 }) => {
   const [lines, setLines] = useState<string[]>([]);
   const [totalLines, setTotalLines] = useState<number>(0);
@@ -23,12 +25,23 @@ export const Editor: React.FC<EditorProps> = ({
   const [followMode, setFollowMode] = useState(false);
   const [selectedText, setSelectedText] = useState('');
   const [highlightedLines, setHighlightedLines] = useState<Set<number>>(new Set());
+  const [modified, setModified] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
   const lastLineRef = useRef<number>(0);
   const loadingRef = useRef(false);
 
   const loadContent = useCallback(async (startLine: number, numLines: number) => {
     if (!file || loadingRef.current) return;
+
+    // 新建文件不加载内容
+    if (file.path.startsWith('untitled-')) {
+      setLines(['']);
+      setTotalLines(1);
+      setLoading(false);
+      loadingRef.current = false;
+      return;
+    }
 
     loadingRef.current = true;
     setLoading(true);
@@ -66,6 +79,7 @@ export const Editor: React.FC<EditorProps> = ({
       setTotalLines(0);
       lastLineRef.current = 0;
       loadingRef.current = false;
+      setModified(false);
       loadContent(0, 100);
     }
   }, [file, loadContent]);
@@ -191,12 +205,21 @@ export const Editor: React.FC<EditorProps> = ({
     }
   };
 
-  const handleTextSelection = () => {
+  const handleTextSelect = () => {
     const selection = window.getSelection();
     if (selection && selection.toString()) {
       setSelectedText(selection.toString());
       onTextSelect(selection.toString());
     }
+  };
+
+  const handleContentChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    const newContent = e.target.value;
+    const newLines = newContent.split('\n');
+    setLines(newLines);
+    setModified(true);
+    onFileModified?.(true);
+    onContentChange?.(newContent);
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -212,6 +235,18 @@ export const Editor: React.FC<EditorProps> = ({
     }
     if (e.key === 'Escape') {
       handleCancelSearch();
+    }
+    // Tab 键插入制表符
+    if (e.key === 'Tab' && e.target === textareaRef.current) {
+      e.preventDefault();
+      const textarea = textareaRef.current;
+      const start = textarea.selectionStart;
+      const end = textarea.selectionEnd;
+      const value = textarea.value;
+      const newValue = value.substring(0, start) + '  ' + value.substring(end);
+      textarea.value = newValue;
+      textarea.selectionStart = textarea.selectionEnd = start + 2;
+      handleContentChange({ target: textarea } as React.ChangeEvent<HTMLTextAreaElement>);
     }
   };
 
@@ -338,6 +373,8 @@ export const Editor: React.FC<EditorProps> = ({
     );
   };
 
+  const content = lines.join('\n');
+
   return (
     <div className="editor-container" onKeyDown={handleKeyDown}>
       <div className="editor-toolbar">
@@ -347,6 +384,7 @@ export const Editor: React.FC<EditorProps> = ({
         >
           {followMode ? 'Following' : 'Follow'}
         </button>
+        {modified && <span className="modified-indicator">●</span>}
         <div className="search-bar">
           <input
             type="text"
@@ -379,14 +417,21 @@ export const Editor: React.FC<EditorProps> = ({
         ref={containerRef}
         className="editor-content"
         onScroll={handleScroll}
-        onMouseUp={handleTextSelection}
+        onMouseUp={handleTextSelect}
       >
         {file?.file_type === 'binary' ? (
-          renderBinaryView(lines.join('\n'))
+          renderBinaryView(content)
+        ) : loading ? (
+          <div className="loading-indicator">Loading...</div>
         ) : (
-          lines.map((line, index) => renderLine(line, index))
+          <textarea
+            ref={textareaRef}
+            className="editor-textarea"
+            value={content}
+            onChange={handleContentChange}
+            spellCheck={false}
+          />
         )}
-        {loading && <div className="loading-indicator">Loading...</div>}
       </div>
     </div>
   );

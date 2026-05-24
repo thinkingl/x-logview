@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, dialog, shell } from 'electron';
+import { app, BrowserWindow, ipcMain, dialog, shell, Menu, MenuItemConstructorOptions } from 'electron';
 import * as path from 'path';
 import { spawn, ChildProcess } from 'child_process';
 import * as fs from 'fs';
@@ -11,14 +11,15 @@ let backendReady = false;
 const BACKEND_PORT = 8090;
 const BACKEND_HEALTH_URL = `http://localhost:${BACKEND_PORT}/health`;
 
+// 设置应用名称
+app.setName('x-logview');
+
 // 获取后端可执行文件路径
 function getBackendPath(): string {
   const isDev = process.env.NODE_ENV === 'development';
   if (isDev) {
-    // 开发模式：项目根目录下的 bin/x-logview-server
     return path.join(__dirname, '..', '..', '..', 'bin', 'x-logview-server');
   }
-  // 生产模式：打包后的目录
   return path.join(process.resourcesPath, 'bin', 'x-logview-server');
 }
 
@@ -35,7 +36,7 @@ function isPortInUse(port: number): Promise<boolean> {
   });
 }
 
-// 检查后端健康状态（使用 http 模块）
+// 检查后端健康状态
 function checkBackendHealth(): Promise<boolean> {
   return new Promise((resolve) => {
     const options = {
@@ -90,13 +91,11 @@ async function waitForBackend(maxWait: number = 30000): Promise<boolean> {
 async function startBackend(): Promise<boolean> {
   const backendPath = getBackendPath();
 
-  // 检查后端文件是否存在
   if (!fs.existsSync(backendPath)) {
     console.error('Backend executable not found:', backendPath);
     return false;
   }
 
-  // 检查端口是否已被占用
   if (await isPortInUse(BACKEND_PORT)) {
     console.log('Port already in use, checking if backend is running...');
     if (await checkBackendHealth()) {
@@ -127,7 +126,6 @@ async function startBackend(): Promise<boolean> {
       handleBackendExit(code);
     });
 
-    // 等待后端启动
     const ready = await waitForBackend();
     if (ready) {
       backendReady = true;
@@ -160,18 +158,14 @@ async function handleBackendExit(code: number | null) {
   });
 
   if (result.response === 0) {
-    // 重新启动
     console.log('User chose to restart backend');
     const started = await startBackend();
     if (started) {
-      // 通知前端重新连接
       mainWindow?.webContents.send('backend-restarted');
     } else {
-      // 启动失败，再次询问
       await handleBackendExit(1);
     }
   } else {
-    // 退出程序
     console.log('User chose to exit');
     app.quit();
   }
@@ -183,13 +177,135 @@ function stopBackend() {
     console.log('Stopping backend...');
     backendProcess.kill('SIGTERM');
 
-    // 给进程一些时间优雅退出
     setTimeout(() => {
       if (backendProcess && !backendProcess.killed) {
         backendProcess.kill('SIGKILL');
       }
     }, 5000);
   }
+}
+
+// 创建菜单
+function createMenu() {
+  const template: MenuItemConstructorOptions[] = [
+    {
+      label: '文件',
+      submenu: [
+        {
+          label: '新建',
+          accelerator: 'CmdOrCtrl+N',
+          click: () => {
+            mainWindow?.webContents.send('menu-new-file');
+          },
+        },
+        {
+          label: '打开...',
+          accelerator: 'CmdOrCtrl+O',
+          click: () => {
+            mainWindow?.webContents.send('menu-open-file');
+          },
+        },
+        { type: 'separator' },
+        {
+          label: '保存',
+          accelerator: 'CmdOrCtrl+S',
+          click: () => {
+            mainWindow?.webContents.send('menu-save');
+          },
+        },
+        {
+          label: '另存为...',
+          accelerator: 'CmdOrCtrl+Shift+S',
+          click: () => {
+            mainWindow?.webContents.send('menu-save-as');
+          },
+        },
+        { type: 'separator' },
+        {
+          label: '关闭标签页',
+          accelerator: 'CmdOrCtrl+W',
+          click: () => {
+            mainWindow?.webContents.send('menu-close-tab');
+          },
+        },
+        { type: 'separator' },
+        { role: 'quit', label: '退出' },
+      ],
+    },
+    {
+      label: '编辑',
+      submenu: [
+        { role: 'undo', label: '撤销' },
+        { role: 'redo', label: '重做' },
+        { type: 'separator' },
+        { role: 'cut', label: '剪切' },
+        { role: 'copy', label: '复制' },
+        { role: 'paste', label: '粘贴' },
+        { role: 'selectAll', label: '全选' },
+      ],
+    },
+    {
+      label: '视图',
+      submenu: [
+        {
+          label: '重新加载',
+          accelerator: 'CmdOrCtrl+R',
+          click: () => {
+            mainWindow?.webContents.send('menu-reload');
+          },
+        },
+        {
+          label: '强制重新加载',
+          accelerator: 'CmdOrCtrl+Shift+R',
+          click: () => {
+            mainWindow?.webContents.reloadIgnoringCache();
+          },
+        },
+        { type: 'separator' },
+        { role: 'toggleDevTools', label: '开发者工具' },
+        { type: 'separator' },
+        { role: 'resetZoom', label: '重置缩放' },
+        { role: 'zoomIn', label: '放大' },
+        { role: 'zoomOut', label: '缩小' },
+        { type: 'separator' },
+        { role: 'togglefullscreen', label: '全屏' },
+      ],
+    },
+    {
+      label: '窗口',
+      submenu: [
+        { role: 'minimize', label: '最小化' },
+        { role: 'zoom', label: '缩放' },
+        { role: 'close', label: '关闭' },
+      ],
+    },
+    {
+      label: '帮助',
+      submenu: [
+        {
+          label: '关于 x-logview',
+          click: async () => {
+            await dialog.showMessageBox(mainWindow!, {
+              type: 'info',
+              title: '关于 x-logview',
+              message: 'x-logview',
+              detail: '万能的跨平台日志查看工具\n版本: 1.0.0',
+              buttons: ['确定'],
+            });
+          },
+        },
+        {
+          label: '检查更新',
+          click: async () => {
+            shell.openExternal('https://github.com/thinkingl/x-logview/releases');
+          },
+        },
+      ],
+    },
+  ];
+
+  const menu = Menu.buildFromTemplate(template);
+  Menu.setApplicationMenu(menu);
 }
 
 function createWindow() {
@@ -217,13 +333,15 @@ function createWindow() {
   }
 
   mainWindow.on('close', () => {
-    // 停止后端服务
     stopBackend();
   });
 
   mainWindow.on('closed', () => {
     mainWindow = null;
   });
+
+  // 创建菜单
+  createMenu();
 }
 
 // IPC 处理
@@ -247,6 +365,43 @@ ipcMain.handle('open-file', async () => {
   return result.filePaths[0];
 });
 
+ipcMain.handle('new-file', () => {
+  return true;
+});
+
+ipcMain.handle('save-file', async (_, filePath: string, content: string) => {
+  try {
+    fs.writeFileSync(filePath, content, 'utf-8');
+    return { success: true };
+  } catch (error: any) {
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('save-file-as', async (_, content: string) => {
+  if (!mainWindow) return null;
+
+  const result = await dialog.showSaveDialog(mainWindow, {
+    filters: [
+      { name: 'Text Files', extensions: ['txt', 'log'] },
+      { name: 'JSON Files', extensions: ['json'] },
+      { name: 'XML Files', extensions: ['xml'] },
+      { name: 'All Files', extensions: ['*'] },
+    ],
+  });
+
+  if (result.canceled) {
+    return null;
+  }
+
+  try {
+    fs.writeFileSync(result.filePath, content, 'utf-8');
+    return { path: result.filePath, success: true };
+  } catch (error: any) {
+    return { success: false, error: error.message };
+  }
+});
+
 ipcMain.handle('get-app-path', () => {
   return app.getPath('userData');
 });
@@ -266,7 +421,6 @@ ipcMain.handle('get-backend-status', () => {
 
 // 应用启动
 app.whenReady().then(async () => {
-  // 启动后端服务
   console.log('Starting backend service...');
   const started = await startBackend();
 
@@ -287,7 +441,6 @@ app.whenReady().then(async () => {
     }
   }
 
-  // 创建窗口
   createWindow();
 
   app.on('activate', () => {

@@ -5,6 +5,7 @@ import (
 	"log"
 	"net/http"
 	"sync"
+	"time"
 
 	"github.com/gorilla/websocket"
 )
@@ -192,6 +193,31 @@ func (c *Client) Send(msgType MessageType, payload interface{}) {
 	msg := Message{
 		Type:    msgType,
 		Payload: data,
+	}
+
+	msgData, err := json.Marshal(msg)
+	if err != nil {
+		return
+	}
+
+	select {
+	case c.send <- msgData:
+	default:
+		close(c.send)
+	}
+}
+
+func (c *Client) SendResponse(id string, msgType MessageType, payload interface{}) {
+	data, err := json.Marshal(payload)
+	if err != nil {
+		return
+	}
+
+	msg := Message{
+		ID:        id,
+		Type:      msgType,
+		Payload:   data,
+		Timestamp: time.Now().UnixMilli(),
 	}
 
 	msgData, err := json.Marshal(msg)

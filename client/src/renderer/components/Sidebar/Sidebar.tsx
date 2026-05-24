@@ -1,38 +1,50 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { FileInfo } from '../../shared/types';
-import { wsService } from '../../services/websocket';
 
 interface SidebarProps {
   onFileOpen: (path: string) => void;
   currentFile: FileInfo | null;
+  files: FileInfo[];
+  onRefreshFiles: () => void;
 }
 
-export const Sidebar: React.FC<SidebarProps> = ({ onFileOpen, currentFile }) => {
-  const [files, setFiles] = useState<FileInfo[]>([]);
+export const Sidebar: React.FC<SidebarProps> = ({ onFileOpen, currentFile, files, onRefreshFiles }) => {
   const [sessions, setSessions] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const retryCountRef = useRef(0);
+  const maxRetries = 3;
 
   useEffect(() => {
-    loadFiles();
-    loadSessions();
+    // 延迟加载，等待后端启动完成
+    const loadTimer = setTimeout(() => {
+      loadSessions();
+    }, 4000);
+
+    return () => clearTimeout(loadTimer);
   }, []);
 
-  const loadFiles = async () => {
-    try {
-      const response = await fetch('http://127.0.0.1:8090/api/files');
-      const data = await response.json();
-      setFiles(data || []);
-    } catch (error) {
-      console.error('Failed to load files:', error);
-    }
-  };
-
   const loadSessions = async () => {
+    if (retryCountRef.current >= maxRetries) {
+      setLoading(false);
+      return;
+    }
+
     try {
       const response = await fetch('http://127.0.0.1:8090/api/sessions');
+      if (!response.ok) {
+        throw new Error('Failed to fetch');
+      }
       const data = await response.json();
       setSessions(data || []);
+      setLoading(false);
     } catch (error) {
       console.error('Failed to load sessions:', error);
+      retryCountRef.current += 1;
+      if (retryCountRef.current < maxRetries) {
+        setTimeout(loadSessions, 5000);
+      } else {
+        setLoading(false);
+      }
     }
   };
 
@@ -51,13 +63,18 @@ export const Sidebar: React.FC<SidebarProps> = ({ onFileOpen, currentFile }) => 
     <div className="sidebar">
       <div className="sidebar-header">
         <span className="sidebar-title">Open Files</span>
-        <button className="toolbar-button" onClick={loadFiles}>
+        <button className="toolbar-button" onClick={onRefreshFiles}>
           Refresh
         </button>
       </div>
 
       <div className="sidebar-content">
-        {files.length === 0 ? (
+        {loading ? (
+          <div className="empty-state">
+            <div className="empty-state-icon">⏳</div>
+            <div>正在连接后端服务...</div>
+          </div>
+        ) : files.length === 0 ? (
           <div className="empty-state">
             <div className="empty-state-icon">📂</div>
             <div>No files open</div>

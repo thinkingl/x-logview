@@ -137,7 +137,7 @@ func registerHandlers(
 		}
 
 		_, err := fileService.Open(req.Path, func(info file.FileInfo) {
-			conn.Send(ws.MsgFileUpdate, info)
+			conn.SendResponse(msg.ID, ws.MsgFileUpdate, info)
 		})
 		if err != nil {
 			conn.SendError(msg.ID, err)
@@ -145,7 +145,7 @@ func registerHandlers(
 		}
 
 		info, _ := fileService.GetInfo(req.Path)
-		conn.Send(ws.MsgFileOpen, info)
+		conn.SendResponse(msg.ID, ws.MsgFileOpen, info)
 	})
 
 	hub.Handle(ws.MsgFileClose, func(conn *ws.Client, msg ws.Message) {
@@ -182,7 +182,7 @@ func registerHandlers(
 			return
 		}
 
-		conn.Send(ws.MsgFileContent, result)
+		conn.SendResponse(msg.ID, ws.MsgFileContent, result)
 	})
 
 	hub.Handle(ws.MsgSearchStart, func(conn *ws.Client, msg ws.Message) {
@@ -205,7 +205,7 @@ func registerHandlers(
 
 		go func() {
 			for result := range resultChan {
-				conn.Send(ws.MsgSearchResult, result)
+				conn.SendResponse(msg.ID, ws.MsgSearchResult, result)
 			}
 		}()
 	})
@@ -230,7 +230,7 @@ func registerHandlers(
 		}
 
 		enc := encoding.DetectEncoding(sample)
-		conn.Send(ws.MsgEncodeDetect, map[string]string{
+		conn.SendResponse(msg.ID, ws.MsgEncodeDetect, map[string]string{
 			"encoding": string(enc),
 		})
 	})
@@ -258,7 +258,7 @@ func registerHandlers(
 			return
 		}
 
-		conn.Send(ws.MsgEncodeConvert, map[string]interface{}{
+		conn.SendResponse(msg.ID, ws.MsgEncodeConvert, map[string]interface{}{
 			"path":      req.Path,
 			"encoding":  req.To,
 			"converted": converted,
@@ -280,7 +280,7 @@ func registerHandlers(
 			return
 		}
 
-		conn.Send(ws.MsgFormatXML, map[string]string{
+		conn.SendResponse(msg.ID, ws.MsgFormatXML, map[string]string{
 			"formatted": string(formatted),
 		})
 	})
@@ -300,7 +300,7 @@ func registerHandlers(
 			return
 		}
 
-		conn.Send(ws.MsgFormatJSON, map[string]string{
+		conn.SendResponse(msg.ID, ws.MsgFormatJSON, map[string]string{
 			"formatted": string(formatted),
 		})
 	})
@@ -322,7 +322,7 @@ func registerHandlers(
 		}
 		sessionManager.Update(req.ID, req.Editor)
 
-		conn.Send(ws.MsgSessionSave, map[string]string{
+		conn.SendResponse(msg.ID, ws.MsgSessionSave, map[string]string{
 			"status": "saved",
 		})
 	})
@@ -342,7 +342,7 @@ func registerHandlers(
 			return
 		}
 
-		conn.Send(ws.MsgSessionRestore, s)
+		conn.SendResponse(msg.ID, ws.MsgSessionRestore, s)
 	})
 
 	hub.Handle(ws.MsgStateSync, func(conn *ws.Client, msg ws.Message) {
@@ -378,7 +378,7 @@ func registerHandlers(
 	})
 
 	hub.Handle(ws.MsgPing, func(conn *ws.Client, msg ws.Message) {
-		conn.Send(ws.MsgPong, nil)
+		conn.SendResponse(msg.ID, ws.MsgPong, nil)
 	})
 
 	hub.Handle(ws.MsgRemoteConnect, func(conn *ws.Client, msg ws.Message) {
@@ -396,7 +396,7 @@ func registerHandlers(
 			return
 		}
 
-		conn.Send(ws.MsgRemoteConnect, map[string]string{
+		conn.SendResponse(msg.ID, ws.MsgRemoteConnect, map[string]string{
 			"status": "connected",
 			"id":     req.ID,
 		})
@@ -416,14 +416,14 @@ func registerHandlers(
 			return
 		}
 
-		conn.Send(ws.MsgRemoteDisconnect, map[string]string{
+		conn.SendResponse(msg.ID, ws.MsgRemoteDisconnect, map[string]string{
 			"status": "disconnected",
 		})
 	})
 
 	hub.Handle(ws.MsgRemoteList, func(conn *ws.Client, msg ws.Message) {
 		connections := remoteManager.ListConnections()
-		conn.Send(ws.MsgRemoteList, map[string]interface{}{
+		conn.SendResponse(msg.ID, ws.MsgRemoteList, map[string]interface{}{
 			"connections": connections,
 		})
 	})
@@ -450,7 +450,7 @@ func registerHandlers(
 			return
 		}
 
-		conn.Send(ws.MsgRemoteExec, map[string]string{
+		conn.SendResponse(msg.ID, ws.MsgRemoteExec, map[string]string{
 			"output": output,
 		})
 	})
@@ -469,7 +469,7 @@ func registerHandlers(
 			log.Printf("Auto-save restored for session: %s", state.ID)
 		})
 
-		conn.Send(ws.MsgAutoSave, map[string]string{
+		conn.SendResponse(msg.ID, ws.MsgAutoSave, map[string]string{
 			"status": "registered",
 		})
 	})
@@ -489,7 +489,7 @@ func registerHandlers(
 			return
 		}
 
-		conn.Send(ws.MsgAutoSaveRestore, state)
+		conn.SendResponse(msg.ID, ws.MsgAutoSaveRestore, state)
 	})
 
 	hub.Handle(ws.MsgAutoSaveUpdate, func(conn *ws.Client, msg ws.Message) {
@@ -508,7 +508,7 @@ func registerHandlers(
 		autoSaveManager.UpdateCursor(req.ID, req.CursorLine, req.CursorCol)
 		autoSaveManager.UpdateScroll(req.ID, req.ScrollTop, req.ScrollLeft)
 
-		conn.Send(ws.MsgAutoSaveUpdate, map[string]string{
+		conn.SendResponse(msg.ID, ws.MsgAutoSaveUpdate, map[string]string{
 			"status": "updated",
 		})
 	})
@@ -532,6 +532,6 @@ func registerHandlers(
 			return
 		}
 
-		conn.Send(ws.MsgSearchReplace, result)
+		conn.SendResponse(msg.ID, ws.MsgSearchReplace, result)
 	})
 }
