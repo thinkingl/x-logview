@@ -172,17 +172,49 @@ async function handleBackendExit(code: number | null) {
 }
 
 // 停止后端服务
-function stopBackend() {
-  if (backendProcess) {
-    console.log('Stopping backend...');
+function stopBackend(): Promise<void> {
+  return new Promise((resolve) => {
+    if (!backendProcess || backendProcess.killed) {
+      console.log('No backend process to stop');
+      resolve();
+      return;
+    }
+
+    console.log('Stopping backend process...', backendProcess.pid);
+
+    // 监听进程退出事件
+    const onExit = (code: number | null, signal: string | null) => {
+      console.log(`Backend process exited with code ${code}, signal ${signal}`);
+      cleanup();
+      resolve();
+    };
+
+    const cleanup = () => {
+      backendProcess?.removeListener('exit', onExit);
+      backendProcess = null;
+      backendReady = false;
+    };
+
+    backendProcess.on('exit', onExit);
+
+    // 发送 SIGTERM 信号
     backendProcess.kill('SIGTERM');
 
+    // 设置超时，如果进程没有在 5 秒内退出，则强制杀死
     setTimeout(() => {
       if (backendProcess && !backendProcess.killed) {
+        console.log('Backend process did not exit, sending SIGKILL...');
         backendProcess.kill('SIGKILL');
       }
     }, 5000);
-  }
+
+    // 设置最大等待时间
+    setTimeout(() => {
+      console.log('Timeout waiting for backend to exit, force resolving');
+      cleanup();
+      resolve();
+    }, 8000);
+  });
 }
 
 // 创建菜单
@@ -332,8 +364,11 @@ function createWindow() {
     mainWindow.loadFile(path.join(__dirname, '..', 'renderer', 'index.html'));
   }
 
-  mainWindow.on('close', () => {
-    stopBackend();
+  mainWindow.on('close', async (e) => {
+    // 阻止默认关闭行为，等待后端停止
+    e.preventDefault();
+    await stopBackend();
+    mainWindow?.destroy();
   });
 
   mainWindow.on('closed', () => {
@@ -450,13 +485,13 @@ app.whenReady().then(async () => {
   });
 });
 
-app.on('window-all-closed', () => {
-  stopBackend();
+app.on('window-all-closed', async () => {
+  await stopBackend();
   if (process.platform !== 'darwin') {
     app.quit();
   }
 });
 
-app.on('before-quit', () => {
-  stopBackend();
+app.on('before-quit', async () => {
+  await stopBackend();
 });

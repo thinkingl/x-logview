@@ -57,9 +57,10 @@ const defaultConfig: AppConfig = {
 interface SettingsProps {
   isOpen: boolean;
   onClose: () => void;
+  onThemeChange?: (theme: string) => void;
 }
 
-export const Settings: React.FC<SettingsProps> = ({ isOpen, onClose }) => {
+export const Settings: React.FC<SettingsProps> = ({ isOpen, onClose, onThemeChange }) => {
   const [config, setConfig] = useState<AppConfig>(defaultConfig);
   const [activeTab, setActiveTab] = useState('editor');
   const [hasChanges, setHasChanges] = useState(false);
@@ -172,7 +173,10 @@ export const Settings: React.FC<SettingsProps> = ({ isOpen, onClose }) => {
                   <label>主题</label>
                   <select
                     value={config.editor.theme}
-                    onChange={(e) => updateConfig('editor.theme', e.target.value)}
+                    onChange={(e) => {
+                      updateConfig('editor.theme', e.target.value);
+                      onThemeChange?.(e.target.value);
+                    }}
                   >
                     <option value="opencode">OpenCode</option>
                     <option value="dark">Dark</option>

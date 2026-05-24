@@ -23,14 +23,39 @@ function App() {
   const [rightPanelOpen, setRightPanelOpen] = useState(true);
   const [selectedText, setSelectedText] = useState('');
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [theme, setTheme] = useState(() => {
+    return localStorage.getItem('x-logview-theme') || 'opencode';
+  });
 
   const currentFile = tabs.find(t => t.id === activeTabId)?.file || null;
 
-  // 保存打开的文件到 localStorage
+  // 应用主题
+  useEffect(() => {
+    document.documentElement.setAttribute('data-theme', theme);
+    localStorage.setItem('x-logview-theme', theme);
+  }, [theme]);
+
+  // 保存打开的文件和状态到 localStorage
   const saveOpenFiles = useCallback(() => {
-    const filePaths = tabs.map(t => t.file.path);
-    localStorage.setItem('x-logview-open-files', JSON.stringify(filePaths));
+    const fileStates = tabs.map(t => ({
+      path: t.file.path,
+      modified: t.modified,
+    }));
+    localStorage.setItem('x-logview-open-files', JSON.stringify(fileStates));
   }, [tabs]);
+
+  // 保存光标位置和视图状态
+  const saveEditorState = useCallback((tabId: string, state: { cursorLine: number; cursorColumn: number; scrollTop: number }) => {
+    const states = JSON.parse(localStorage.getItem('x-logview-editor-states') || '{}');
+    states[tabId] = state;
+    localStorage.setItem('x-logview-editor-states', JSON.stringify(states));
+  }, []);
+
+  // 获取编辑器状态
+  const getEditorState = useCallback((tabId: string) => {
+    const states = JSON.parse(localStorage.getItem('x-logview-editor-states') || '{}');
+    return states[tabId] || null;
+  }, []);
 
   // 当 tabs 变化时保存
   useEffect(() => {
@@ -144,7 +169,12 @@ function App() {
     if (!saved) return;
 
     try {
-      const filePaths: string[] = JSON.parse(saved);
+      const data = JSON.parse(saved);
+      // 兼容旧格式（纯字符串数组）和新格式（对象数组）
+      const filePaths: string[] = Array.isArray(data)
+        ? data.map(item => typeof item === 'string' ? item : item.path)
+        : [];
+      
       if (filePaths.length > 0) {
         console.log('Restoring open files:', filePaths);
         filePaths.forEach(path => handleFileOpen(path));
@@ -218,6 +248,46 @@ function App() {
       }
     }
   }, [currentFile, activeTabId]);
+
+  const handleFormatJSON = useCallback(async () => {
+    if (!currentFile) return;
+    try {
+      const response = await wsService.send('format:json', { path: currentFile.path });
+      console.log('Formatted JSON:', response.payload);
+    } catch (error) {
+      console.error('Failed to format JSON:', error);
+    }
+  }, [currentFile]);
+
+  const handleMinifyJSON = useCallback(async () => {
+    if (!currentFile) return;
+    try {
+      const response = await wsService.send('format:json', { path: currentFile.path, minify: true });
+      console.log('Minified JSON:', response.payload);
+    } catch (error) {
+      console.error('Failed to minify JSON:', error);
+    }
+  }, [currentFile]);
+
+  const handleFormatXML = useCallback(async () => {
+    if (!currentFile) return;
+    try {
+      const response = await wsService.send('format:xml', { path: currentFile.path });
+      console.log('Formatted XML:', response.payload);
+    } catch (error) {
+      console.error('Failed to format XML:', error);
+    }
+  }, [currentFile]);
+
+  const handleMinifyXML = useCallback(async () => {
+    if (!currentFile) return;
+    try {
+      const response = await wsService.send('format:xml', { path: currentFile.path, minify: true });
+      console.log('Minified XML:', response.payload);
+    } catch (error) {
+      console.error('Failed to minify XML:', error);
+    }
+  }, [currentFile]);
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -302,6 +372,23 @@ function App() {
         <div className="toolbar-separator" />
         <button
           className="toolbar-button"
+          onClick={handleFormatJSON}
+          disabled={!currentFile}
+          title="格式化 JSON"
+        >
+          { } 格式化
+        </button>
+        <button
+          className="toolbar-button"
+          onClick={handleMinifyJSON}
+          disabled={!currentFile}
+          title="压缩 JSON"
+        >
+          { } 压缩
+        </button>
+        <div className="toolbar-separator" />
+        <button
+          className="toolbar-button"
           onClick={() => setSidebarOpen(!sidebarOpen)}
         >
           {sidebarOpen ? '◀' : '▶'} 侧边栏
@@ -368,6 +455,7 @@ function App() {
       <Settings
         isOpen={settingsOpen}
         onClose={() => setSettingsOpen(false)}
+        onThemeChange={setTheme}
       />
     </div>
   );

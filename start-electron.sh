@@ -62,11 +62,17 @@ cleanup() {
     kill $ELECTRON_PID 2>/dev/null || true
     kill $VITE_PID 2>/dev/null || true
     pkill -f "electron ." 2>/dev/null || true
+    pkill -f "vite" 2>/dev/null || true
     echo -e "${GREEN}已停止${NC}"
     exit 0
 }
 
-trap cleanup SIGINT SIGTERM
+trap cleanup SIGINT SIGTERM SIGHUP
 
-# 等待
-wait
+# 监控 Electron 进程
+while kill -0 $ELECTRON_PID 2>/dev/null; do
+    sleep 1
+done
+
+# Electron 退出后清理
+cleanup
