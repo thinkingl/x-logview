@@ -34,8 +34,8 @@ export const Editor: React.FC<EditorProps> = ({
   const loadContent = useCallback(async (startLine: number, numLines: number) => {
     if (!file || loadingRef.current) return;
 
-    // 新建文件不加载内容
-    if (file.path.startsWith('untitled-')) {
+    // 新建文件不加载内容（检查路径是否包含 untitled）
+    if (file.path.includes('untitled-')) {
       setLines(['']);
       setTotalLines(1);
       setLoading(false);
