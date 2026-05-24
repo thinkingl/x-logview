@@ -42,6 +42,16 @@ function App() {
       modified: t.modified,
     }));
     localStorage.setItem('x-logview-open-files', JSON.stringify(fileStates));
+    
+    // 保存临时文件内容到本地存储
+    tabs.forEach(tab => {
+      if (tab.file.path.includes('/tmp/x-logview/temp/')) {
+        const content = localStorage.getItem(`x-logview-content-${tab.id}`);
+        if (content) {
+          localStorage.setItem(`x-logview-temp-${tab.file.path}`, content);
+        }
+      }
+    });
   }, [tabs]);
 
   // 保存光标位置和视图状态
@@ -177,7 +187,27 @@ function App() {
       
       if (filePaths.length > 0) {
         console.log('Restoring open files:', filePaths);
-        filePaths.forEach(path => handleFileOpen(path));
+        filePaths.forEach(path => {
+          // 对于临时文件，创建新的临时文件标签
+          if (path.includes('/tmp/x-logview/temp/untitled-')) {
+            const newTab: Tab = {
+              id: `tab-${Date.now()}`,
+              file: {
+                path,
+                size: 0,
+                mod_time: new Date().toISOString(),
+                file_type: 'text',
+                encoding: 'utf-8',
+                total_lines: 0,
+                loaded: true,
+              },
+              modified: false,
+            };
+            setTabs(prev => [...prev, newTab]);
+          } else {
+            handleFileOpen(path);
+          }
+        });
       }
     } catch (error) {
       console.error('Failed to restore open files:', error);
@@ -199,10 +229,14 @@ function App() {
   }, [handleFileOpen]);
 
   const handleNewFile = useCallback(() => {
+    const tempDir = '/tmp/x-logview/temp';
+    const fileName = `untitled-${Date.now()}.txt`;
+    const filePath = `${tempDir}/${fileName}`;
+    
     const newTab: Tab = {
       id: `tab-${Date.now()}`,
       file: {
-        path: `untitled-${Date.now()}.txt`,
+        path: filePath,
         size: 0,
         mod_time: new Date().toISOString(),
         file_type: 'text',
