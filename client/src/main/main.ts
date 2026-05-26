@@ -365,28 +365,26 @@ function createWindow() {
   }
 
   mainWindow.on('close', (e) => {
-    // 阻止默认关闭行为
     e.preventDefault();
     
     console.log('Window closing, stopping backend...');
     
-    // 同步停止后端进程
     if (backendProcess && !backendProcess.killed) {
+      const onExit = () => {
+        console.log('Backend process exited');
+        mainWindow?.destroy();
+      };
+      
+      backendProcess.on('exit', onExit);
       backendProcess.kill('SIGTERM');
       
-      // 等待进程退出，最多2秒
-      let waitTime = 0;
-      const checkInterval = 100;
-      const maxWait = 2000;
-      
-      const checkExit = setInterval(() => {
-        waitTime += checkInterval;
-        if (!backendProcess || backendProcess.killed || waitTime >= maxWait) {
-          clearInterval(checkExit);
-          console.log('Backend stopped, destroying window');
-          mainWindow?.destroy();
+      setTimeout(() => {
+        if (backendProcess && !backendProcess.killed) {
+          console.log('Backend did not exit, sending SIGKILL');
+          backendProcess.kill('SIGKILL');
         }
-      }, checkInterval);
+        mainWindow?.destroy();
+      }, 3000);
     } else {
       mainWindow?.destroy();
     }
