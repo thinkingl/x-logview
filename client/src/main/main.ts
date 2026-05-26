@@ -365,19 +365,31 @@ function createWindow() {
   }
 
   mainWindow.on('close', (e) => {
-    // 阻止默认关闭行为，手动处理清理
+    // 阻止默认关闭行为
     e.preventDefault();
+    
+    console.log('Window closing, stopping backend...');
     
     // 同步停止后端进程
     if (backendProcess && !backendProcess.killed) {
-      console.log('Stopping backend process...');
       backendProcess.kill('SIGTERM');
-    }
-    
-    // 延迟销毁窗口，给后端进程时间退出
-    setTimeout(() => {
+      
+      // 等待进程退出，最多2秒
+      let waitTime = 0;
+      const checkInterval = 100;
+      const maxWait = 2000;
+      
+      const checkExit = setInterval(() => {
+        waitTime += checkInterval;
+        if (!backendProcess || backendProcess.killed || waitTime >= maxWait) {
+          clearInterval(checkExit);
+          console.log('Backend stopped, destroying window');
+          mainWindow?.destroy();
+        }
+      }, checkInterval);
+    } else {
       mainWindow?.destroy();
-    }, 1000);
+    }
   });
 
   mainWindow.on('closed', () => {

@@ -26,6 +26,7 @@ function App() {
   const [theme, setTheme] = useState(() => {
     return localStorage.getItem('x-logview-theme') || 'opencode';
   });
+  const [editorContent, setEditorContent] = useState<Record<string, string>>({});
 
   const currentFile = tabs.find(t => t.id === activeTabId)?.file || null;
 
@@ -40,19 +41,20 @@ function App() {
     const fileStates = tabs.map(t => ({
       path: t.file.path,
       modified: t.modified,
+      content: editorContent[t.id] || '',
     }));
     localStorage.setItem('x-logview-open-files', JSON.stringify(fileStates));
     
     // 保存临时文件内容到本地存储
     tabs.forEach(tab => {
-      if (tab.file.path.includes('/tmp/x-logview/temp/')) {
-        const content = localStorage.getItem(`x-logview-content-${tab.id}`);
+      if (tab.file.path.includes('.x-logview/temp/untitled-') || tab.file.path.includes('/tmp/x-logview/temp/untitled-')) {
+        const content = editorContent[tab.id];
         if (content) {
-          localStorage.setItem(`x-logview-temp-${tab.file.path}`, content);
+          localStorage.setItem(`x-logview-unsaved-${tab.id}`, content);
         }
       }
     });
-  }, [tabs]);
+  }, [tabs, editorContent]);
 
   // 保存光标位置和视图状态
   const saveEditorState = useCallback((tabId: string, state: { cursorLine: number; cursorColumn: number; scrollTop: number }) => {
@@ -194,11 +196,18 @@ function App() {
       
       if (filePaths.length > 0) {
         console.log('Restoring open files:', filePaths);
-        filePaths.forEach(path => {
-          // 对于临时文件，创建新的临时文件标签
+        const newTabs: Tab[] = [];
+        const newContent: Record<string, string> = {};
+        
+        filePaths.forEach((item: any) => {
+          const path = typeof item === 'string' ? item : item.path;
+          const tabId = `tab-${Date.now()}-${Math.random()}`;
+          
+          // 对于临时文件，创建新的临时文件标签并恢复内容
           if (path.includes('.x-logview/temp/untitled-') || path.includes('/tmp/x-logview/temp/untitled-')) {
-            const newTab: Tab = {
-              id: `tab-${Date.now()}`,
+            const savedContent = localStorage.getItem(`x-logview-unsaved-${tabId}`) || '';
+            newTabs.push({
+              id: tabId,
               file: {
                 path,
                 size: 0,
@@ -208,13 +217,18 @@ function App() {
                 total_lines: 0,
                 loaded: true,
               },
-              modified: false,
-            };
-            setTabs(prev => [...prev, newTab]);
+              modified: true,
+            });
+            newContent[tabId] = savedContent;
           } else {
             handleFileOpen(path);
           }
         });
+        
+        if (newTabs.length > 0) {
+          setTabs(prev => [...prev, ...newTabs]);
+          setEditorContent(prev => ({ ...prev, ...newContent }));
+        }
       }
     } catch (error) {
       console.error('Failed to restore open files:', error);
@@ -366,6 +380,10 @@ function App() {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [handleFileOpenDialog, activeTabId, handleFileClose, handleFileReload, handleNewFile, handleSaveFile, handleSaveFileAs]);
 
+  const handleContentChange = useCallback((tabId: string, content: string) => {
+    setEditorContent(prev => ({ ...prev, [tabId]: content }));
+  }, []);
+
   const handleTextSelect = (text: string) => {
     setSelectedText(text);
   };
@@ -479,8 +497,9 @@ function App() {
               }
             }}
             onContentChange={(content) => {
-              // 可以在这里保存内容到状态
-              console.log('Content changed:', content.substring(0, 100));
+              if (activeTabId) {
+                handleContentChange(activeTabId, content);
+              }
             }}
           />
         </div>
