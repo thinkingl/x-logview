@@ -364,11 +364,20 @@ function createWindow() {
     mainWindow.loadFile(path.join(__dirname, '..', 'renderer', 'index.html'));
   }
 
-  mainWindow.on('close', async (e) => {
-    // 阻止默认关闭行为，等待后端停止
+  mainWindow.on('close', (e) => {
+    // 阻止默认关闭行为，手动处理清理
     e.preventDefault();
-    await stopBackend();
-    mainWindow?.destroy();
+    
+    // 同步停止后端进程
+    if (backendProcess && !backendProcess.killed) {
+      console.log('Stopping backend process...');
+      backendProcess.kill('SIGTERM');
+    }
+    
+    // 延迟销毁窗口，给后端进程时间退出
+    setTimeout(() => {
+      mainWindow?.destroy();
+    }, 1000);
   });
 
   mainWindow.on('closed', () => {
