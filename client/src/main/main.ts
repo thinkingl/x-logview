@@ -8,7 +8,7 @@ import * as http from 'http';
 let mainWindow: BrowserWindow | null = null;
 let backendProcess: ChildProcess | null = null;
 let backendReady = false;
-let isReadyToQuit = false;
+let forceQuit = false;
 const BACKEND_PORT = 8090;
 const BACKEND_HEALTH_URL = `http://localhost:${BACKEND_PORT}/health`;
 
@@ -366,32 +366,21 @@ function createWindow() {
   }
 
   mainWindow.on('close', (e) => {
-    if (!isReadyToQuit) {
+    if (!forceQuit) {
       e.preventDefault();
-      
-      console.log('Window closing, stopping backend...');
-      
-      if (backendProcess && !backendProcess.killed) {
-        backendProcess.on('exit', () => {
-          console.log('Backend process exited');
-          isReadyToQuit = true;
-          mainWindow?.close();
-        });
-        
-        backendProcess.kill('SIGTERM');
-        
-        setTimeout(() => {
-          if (backendProcess && !backendProcess.killed) {
-            console.log('Backend did not exit, sending SIGKILL');
-            backendProcess.kill('SIGKILL');
-          }
-          isReadyToQuit = true;
-          mainWindow?.close();
-        }, 3000);
-      } else {
-        isReadyToQuit = true;
-        mainWindow?.close();
-      }
+      mainWindow?.hide();
+      return;
+    }
+    
+    console.log('Window closing, stopping backend...');
+    
+    if (backendProcess && !backendProcess.killed) {
+      backendProcess.kill('SIGTERM');
+      setTimeout(() => {
+        if (backendProcess && !backendProcess.killed) {
+          backendProcess.kill('SIGKILL');
+        }
+      }, 3000);
     }
   });
 
@@ -521,6 +510,18 @@ app.on('window-all-closed', () => {
 });
 
 app.on('before-quit', () => {
-  isReadyToQuit = true;
+  forceQuit = true;
   stopBackend();
+});
+
+app.on('window-all-closed', () => {
+  if (process.platform !== 'darwin') {
+    app.quit();
+  }
+});
+
+app.on('activate', () => {
+  if (mainWindow) {
+    mainWindow.show();
+  }
 });
