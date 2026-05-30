@@ -54,7 +54,14 @@ func main() {
 		log.Printf("Failed to create session manager: %v", err)
 	}
 
-	registerHandlers(hub, fileService, searchService, formatService, sessionManager, remoteManager, autoSaveManager)
+	dbPath := filepath.Join(sessionDir, "sessions.db")
+	sqliteStore, err := session.NewSQLiteStore(dbPath)
+	if err != nil {
+		log.Printf("Failed to create SQLite store: %v", err)
+	}
+	defer sqliteStore.Close()
+
+	registerHandlers(hub, fileService, searchService, formatService, sessionManager, remoteManager, autoSaveManager, sqliteStore)
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/ws", hub.ServeWS)
@@ -126,6 +133,7 @@ func registerHandlers(
 	sessionManager *session.SessionManager,
 	remoteManager *remote.RemoteManager,
 	autoSaveManager *session.AutoSaveManager,
+	sqliteStore *session.SQLiteStore,
 ) {
 	hub.Handle(ws.MsgFileOpen, func(conn *ws.Client, msg ws.Message) {
 		var req struct {
@@ -533,5 +541,109 @@ func registerHandlers(
 		}
 
 		conn.SendResponse(msg.ID, ws.MsgSearchReplace, result)
+	})
+
+	hub.Handle(ws.MsgSessionGet, func(conn *ws.Client, msg ws.Message) {
+		session, err := sqliteStore.GetActiveSession()
+		if err != nil {
+			conn.SendError(msg.ID, err)
+			return
+		}
+		if session == nil {
+			conn.SendResponse(msg.ID, ws.MsgSessionGet, nil)
+			return
+		}
+		conn.SendResponse(msg.ID, ws.MsgSessionGet, session)
+	})
+
+	hub.Handle(ws.MsgSessionUpdate, func(conn *ws.Client, msg ws.Message) {
+		var req struct {
+			ID   string `json:"id"`
+			Name string `json:"name"`
+		}
+		if err := json.Unmarshal(msg.Payload, &req); err != nil {
+			conn.SendError(msg.ID, err)
+			return
+		}
+
+		if err := sqliteStore.UpdateSessionTimestamp(req.ID); err != nil {
+			conn.SendError(msg.ID, err)
+			return
+		}
+
+		conn.SendResponse(msg.ID, ws.MsgSessionUpdate, map[string]string{"status": "updated"})
+	})
+
+	hub.Handle(ws.MsgSessionAddFile, func(conn *ws.Client, msg ws.Message) {
+		var req struct {
+			SessionID string            `json:"session_id"`
+			File      session.FileState `json:"file"`
+		}
+		if err := json.Unmarshal(msg.Payload, &req); err != nil {
+			conn.SendError(msg.ID, err)
+			return
+		}
+
+		if err := sqliteStore.AddFile(req.SessionID, req.File); err != nil {
+			conn.SendError(msg.ID, err)
+			return
+		}
+
+		conn.SendResponse(msg.ID, ws.MsgSessionAddFile, map[string]string{"status": "added"})
+	})
+
+	hub.Handle(ws.MsgSessionRemoveFile, func(conn *ws.Client, msg ws.Message) {
+		var req struct {
+			SessionID string `json:"session_id"`
+			FilePath  string `json:"file_path"`
+		}
+		if err := json.Unmarshal(msg.Payload, &req); err != nil {
+			conn.SendError(msg.ID, err)
+			return
+		}
+
+		if err := sqliteStore.RemoveFile(req.SessionID, req.FilePath); err != nil {
+			conn.SendError(msg.ID, err)
+			return
+		}
+
+		conn.SendResponse(msg.ID, ws.MsgSessionRemoveFile, map[string]string{"status": "removed"})
+	})
+
+	hub.Handle(ws.MsgSessionUpdateFile, func(conn *ws.Client, msg ws.Message) {
+		var req struct {
+			SessionID string            `json:"session_id"`
+			FilePath  string            `json:"file_path"`
+			File      session.FileState `json:"file"`
+		}
+		if err := json.Unmarshal(msg.Payload, &req); err != nil {
+			conn.SendError(msg.ID, err)
+			return
+		}
+
+		if err := sqliteStore.UpdateFile(req.SessionID, req.FilePath, req.File); err != nil {
+			conn.SendError(msg.ID, err)
+			return
+		}
+
+		conn.SendResponse(msg.ID, ws.MsgSessionUpdateFile, map[string]string{"status": "updated"})
+	})
+
+	hub.Handle(ws.MsgSessionSetActive, func(conn *ws.Client, msg ws.Message) {
+		var req struct {
+			SessionID string `json:"session_id"`
+			FilePath  string `json:"file_path"`
+		}
+		if err := json.Unmarshal(msg.Payload, &req); err != nil {
+			conn.SendError(msg.ID, err)
+			return
+		}
+
+		if err := sqliteStore.SetActiveFile(req.SessionID, req.FilePath); err != nil {
+			conn.SendError(msg.ID, err)
+			return
+		}
+
+		conn.SendResponse(msg.ID, ws.MsgSessionSetActive, map[string]string{"status": "updated"})
 	})
 }

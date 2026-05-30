@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Editor } from './components/Editor/Editor';
 import { Sidebar } from './components/Sidebar/Sidebar';
 import { RightPanel } from './components/RightPanel/RightPanel';
@@ -6,6 +6,7 @@ import { StatusBar } from './components/StatusBar/StatusBar';
 import { TabBar } from './components/TabBar/TabBar';
 import { Settings } from './components/Settings/Settings';
 import { wsService } from './services/websocket';
+import { sessionService, SessionData, FileState } from './services/session';
 import { FileInfo } from './shared/types';
 import './App.css';
 
@@ -27,93 +28,130 @@ function App() {
     return localStorage.getItem('x-logview-theme') || 'opencode';
   });
   const [editorContent, setEditorContent] = useState<Record<string, string>>({});
+  const [sessionId, setSessionId] = useState<string | null>(null);
+  const sessionInitialized = useRef(false);
 
   const currentFile = tabs.find(t => t.id === activeTabId)?.file || null;
 
-  // 应用主题
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', theme);
     localStorage.setItem('x-logview-theme', theme);
   }, [theme]);
 
-  // 保存打开的文件和状态到 localStorage
-  const saveOpenFiles = useCallback(() => {
-    const fileStates = tabs.map(t => ({
-      path: t.file.path,
-      modified: t.modified,
-      content: editorContent[t.id] || '',
-    }));
-    localStorage.setItem('x-logview-open-files', JSON.stringify(fileStates));
-    
-    // 保存临时文件内容到本地存储
-    tabs.forEach(tab => {
-      if (tab.file.path.includes('.x-logview/temp/untitled-') || tab.file.path.includes('/tmp/x-logview/temp/untitled-')) {
-        const content = editorContent[tab.id];
-        if (content) {
-          localStorage.setItem(`x-logview-unsaved-${tab.id}`, content);
-        }
+  const syncSession = useCallback(async (tabList: Tab[], content: Record<string, string>, activeId: string | null) => {
+    if (!sessionId) return;
+
+    for (const tab of tabList) {
+      const fileState: FileState = {
+        session_id: sessionId,
+        file_path: tab.file.path,
+        isUntitled: tab.file.path.includes('untitled-'),
+        content: content[tab.id] || '',
+        cursor_line: 0,
+        cursor_col: 0,
+        scroll_top: 0,
+        scroll_left: 0,
+        is_active: tab.id === activeId,
+        edit_history: [],
+      };
+
+      try {
+        await sessionService.updateFile(sessionId, tab.file.path, fileState);
+      } catch {
+        await sessionService.addFile(sessionId, fileState);
       }
-    });
-  }, [tabs, editorContent]);
-
-  // 保存光标位置和视图状态
-  const saveEditorState = useCallback((tabId: string, state: { cursorLine: number; cursorColumn: number; scrollTop: number }) => {
-    const states = JSON.parse(localStorage.getItem('x-logview-editor-states') || '{}');
-    states[tabId] = state;
-    localStorage.setItem('x-logview-editor-states', JSON.stringify(states));
-  }, []);
-
-  // 获取编辑器状态
-  const getEditorState = useCallback((tabId: string) => {
-    const states = JSON.parse(localStorage.getItem('x-logview-editor-states') || '{}');
-    return states[tabId] || null;
-  }, []);
-
-  // 当 tabs 变化时保存
-  useEffect(() => {
-    if (tabs.length > 0) {
-      saveOpenFiles();
     }
-  }, [tabs, saveOpenFiles]);
+  }, [sessionId]);
 
   useEffect(() => {
-    // 延迟连接，等待后端启动完成
-    const connectTimer = setTimeout(() => {
-      wsService.connect()
-        .then(() => setConnected(true))
-        .catch(console.error);
+    if (sessionId && tabs.length >= 0) {
+      syncSession(tabs, editorContent, activeTabId);
+    }
+  }, [tabs, editorContent, activeTabId, sessionId, syncSession]);
+
+  useEffect(() => {
+    const connectTimer = setTimeout(async () => {
+      try {
+        await wsService.connect();
+        setConnected(true);
+
+        if (!sessionInitialized.current) {
+          sessionInitialized.current = true;
+          let session = await sessionService.getActiveSession();
+          
+          if (!session) {
+            const newId = `session-${Date.now()}`;
+            await sessionService.createSession(newId, 'Default Session');
+            session = await sessionService.getActiveSession();
+          }
+
+          if (session) {
+            setSessionId(session.id);
+            
+            if (session.files && session.files.length > 0) {
+              const newTabs: Tab[] = [];
+              const newContent: Record<string, string> = {};
+
+              for (const file of session.files) {
+                const tabId = `tab-${Date.now()}-${Math.random()}`;
+                
+                if (file.isUntitled) {
+                  newTabs.push({
+                    id: tabId,
+                    file: {
+                      path: file.file_path,
+                      size: 0,
+                      mod_time: new Date().toISOString(),
+                      file_type: 'text',
+                      encoding: 'utf-8',
+                      total_lines: 0,
+                      loaded: true,
+                    },
+                    modified: true,
+                  });
+                  newContent[tabId] = file.content;
+                } else {
+                  try {
+                    const response = await wsService.send('file:open', { path: file.file_path });
+                    const fileInfo: FileInfo = response.payload;
+                    newTabs.push({
+                      id: tabId,
+                      file: fileInfo,
+                      modified: false,
+                    });
+                    newContent[tabId] = file.content;
+                  } catch (error) {
+                    console.error('Failed to restore file:', file.file_path, error);
+                  }
+                }
+              }
+
+              if (newTabs.length > 0) {
+                setTabs(newTabs);
+                setEditorContent(newContent);
+                
+                const activeFile = session.files.find(f => f.is_active);
+                if (activeFile) {
+                  const activeTab = newTabs.find(t => t.file.path === activeFile.file_path);
+                  if (activeTab) {
+                    setActiveTabId(activeTab.id);
+                  }
+                } else if (newTabs.length > 0) {
+                  setActiveTabId(newTabs[0].id);
+                }
+              }
+            }
+          }
+        }
+      } catch (error) {
+        console.error('Failed to connect:', error);
+      }
     }, 3000);
 
-    // 获取用户数据路径
     if (window.electronAPI) {
-      window.electronAPI.getAppPath().then((path: string) => {
-        localStorage.setItem('x-logview-user-data-path', path);
+      window.electronAPI.onBackendRestarted?.(() => {
+        wsService.reconnect();
       });
-    }
-
-    const handleBackendRestarted = () => {
-      console.log('Backend restarted, reconnecting WebSocket...');
-      wsService.reconnect();
-    };
-
-    // 菜单事件处理
-    const handleMenuNewFile = () => handleNewFile();
-    const handleMenuOpenFile = () => handleFileOpenDialog();
-    const handleMenuSave = () => handleSaveFile();
-    const handleMenuSaveAs = () => handleSaveFileAs();
-    const handleMenuCloseTab = () => {
-      if (activeTabId) handleFileClose(activeTabId);
-    };
-    const handleMenuReload = () => handleFileReload();
-
-    if (window.electronAPI) {
-      window.electronAPI.onBackendRestarted?.(handleBackendRestarted);
-      window.electronAPI.onMenuNewFile?.(handleMenuNewFile);
-      window.electronAPI.onMenuOpenFile?.(handleMenuOpenFile);
-      window.electronAPI.onMenuSave?.(handleMenuSave);
-      window.electronAPI.onMenuSaveAs?.(handleMenuSaveAs);
-      window.electronAPI.onMenuCloseTab?.(handleMenuCloseTab);
-      window.electronAPI.onMenuReload?.(handleMenuReload);
     }
 
     return () => {
@@ -123,18 +161,14 @@ function App() {
   }, []);
 
   const handleFileOpen = useCallback(async (path: string) => {
-    console.log('Opening file:', path);
     const existingTab = tabs.find(t => t.file.path === path);
     if (existingTab) {
-      console.log('File already open, switching to tab');
       setActiveTabId(existingTab.id);
       return;
     }
 
     try {
-      console.log('Sending file:open to backend');
       const response = await wsService.send('file:open', { path });
-      console.log('Received response:', response);
       const fileInfo: FileInfo = response.payload;
 
       const newTab: Tab = {
@@ -143,7 +177,6 @@ function App() {
         modified: false,
       };
 
-      console.log('Creating new tab:', newTab);
       setTabs(prev => [...prev, newTab]);
       setActiveTabId(newTab.id);
     } catch (error) {
@@ -151,19 +184,25 @@ function App() {
     }
   }, [tabs]);
 
-  const handleFileClose = useCallback((tabId: string) => {
+  const handleFileClose = useCallback(async (tabId: string) => {
     const tab = tabs.find(t => t.id === tabId);
-    if (tab) {
+    if (tab && sessionId) {
+      await sessionService.removeFile(sessionId, tab.file.path);
       wsService.send('file:close', { path: tab.file.path }).catch(console.error);
     }
 
     setTabs(prev => prev.filter(t => t.id !== tabId));
+    setEditorContent(prev => {
+      const newContent = { ...prev };
+      delete newContent[tabId];
+      return newContent;
+    });
 
     if (activeTabId === tabId) {
       const remainingTabs = tabs.filter(t => t.id !== tabId);
       setActiveTabId(remainingTabs.length > 0 ? remainingTabs[remainingTabs.length - 1].id : null);
     }
-  }, [tabs, activeTabId]);
+  }, [tabs, activeTabId, sessionId]);
 
   const handleFileReload = useCallback(async () => {
     if (!currentFile) return;
@@ -180,77 +219,7 @@ function App() {
     }
   }, [currentFile, activeTabId]);
 
-  // 恢复打开的文件
-  useEffect(() => {
-    if (!connected) return;
-
-    const saved = localStorage.getItem('x-logview-open-files');
-    if (!saved) return;
-
-    try {
-      const data = JSON.parse(saved);
-      // 兼容旧格式（纯字符串数组）和新格式（对象数组）
-      const filePaths: string[] = Array.isArray(data)
-        ? data.map(item => typeof item === 'string' ? item : item.path)
-        : [];
-      
-      if (filePaths.length > 0) {
-        console.log('Restoring open files:', filePaths);
-        const newTabs: Tab[] = [];
-        const newContent: Record<string, string> = {};
-        
-        filePaths.forEach((item: any) => {
-          const path = typeof item === 'string' ? item : item.path;
-          const tabId = `tab-${Date.now()}-${Math.random()}`;
-          
-          // 对于临时文件，创建新的临时文件标签并恢复内容
-          if (path.includes('.x-logview/temp/untitled-') || path.includes('/tmp/x-logview/temp/untitled-')) {
-            const savedContent = localStorage.getItem(`x-logview-unsaved-${tabId}`) || '';
-            newTabs.push({
-              id: tabId,
-              file: {
-                path,
-                size: 0,
-                mod_time: new Date().toISOString(),
-                file_type: 'text',
-                encoding: 'utf-8',
-                total_lines: 0,
-                loaded: true,
-              },
-              modified: true,
-            });
-            newContent[tabId] = savedContent;
-          } else {
-            handleFileOpen(path);
-          }
-        });
-        
-        if (newTabs.length > 0) {
-          setTabs(prev => [...prev, ...newTabs]);
-          setEditorContent(prev => ({ ...prev, ...newContent }));
-        }
-      }
-    } catch (error) {
-      console.error('Failed to restore open files:', error);
-    }
-  }, [connected, handleFileOpen]);
-
-  const handleFileOpenDialog = useCallback(async () => {
-    console.log('Opening file dialog');
-    if (window.electronAPI) {
-      console.log('electronAPI available');
-      const path = await window.electronAPI.openFile();
-      console.log('Selected path:', path);
-      if (path) {
-        handleFileOpen(path);
-      }
-    } else {
-      console.error('electronAPI not available');
-    }
-  }, [handleFileOpen]);
-
   const handleNewFile = useCallback(() => {
-    // 使用用户数据目录下的 temp 文件夹，避免重启丢失
     const userDataPath = localStorage.getItem('x-logview-user-data-path') || '~/.x-logview';
     const tempDir = `${userDataPath}/temp`;
     const fileName = `untitled-${Date.now()}.txt`;
@@ -279,38 +248,60 @@ function App() {
     if (window.electronAPI) {
       const activeTab = tabs.find(t => t.id === activeTabId);
       if (activeTab) {
-        const result = await window.electronAPI.saveFile(currentFile.path, '');
+        const content = editorContent[activeTab.id] || '';
+        const result = await window.electronAPI.saveFile(currentFile.path, content);
         if (result?.success) {
-          console.log('File saved successfully');
+          setTabs(prev => prev.map(t =>
+            t.id === activeTabId ? { ...t, modified: false } : t
+          ));
         }
       }
     }
-  }, [currentFile, activeTabId, tabs]);
+  }, [currentFile, activeTabId, tabs, editorContent]);
 
   const handleSaveFileAs = useCallback(async () => {
     if (!currentFile) return;
 
     if (window.electronAPI) {
-      const result = await window.electronAPI.saveFileAs('');
+      const activeTab = tabs.find(t => t.id === activeTabId);
+      const content = activeTab ? editorContent[activeTab.id] || '' : '';
+      const result = await window.electronAPI.saveFileAs(content);
       if (result?.success && result.path) {
-        console.log('File saved to:', result.path);
-        // 更新 tab 的文件路径
         if (activeTabId) {
           setTabs(prev => prev.map(t =>
             t.id === activeTabId
-              ? { ...t, file: { ...t.file, path: result.path } }
+              ? { ...t, file: { ...t.file, path: result.path }, modified: false }
               : t
           ));
         }
       }
     }
-  }, [currentFile, activeTabId]);
+  }, [currentFile, activeTabId, editorContent]);
+
+  const handleContentChange = useCallback((tabId: string, content: string) => {
+    setEditorContent(prev => ({ ...prev, [tabId]: content }));
+    setTabs(prev => prev.map(t =>
+      t.id === tabId ? { ...t, modified: true } : t
+    ));
+  }, []);
+
+  const handleTextSelect = (text: string) => {
+    setSelectedText(text);
+  };
+
+  const handleFileOpenDialog = useCallback(async () => {
+    if (window.electronAPI) {
+      const path = await window.electronAPI.openFile();
+      if (path) {
+        handleFileOpen(path);
+      }
+    }
+  }, [handleFileOpen]);
 
   const handleFormatJSON = useCallback(async () => {
     if (!currentFile) return;
     try {
-      const response = await wsService.send('format:json', { path: currentFile.path });
-      console.log('Formatted JSON:', response.payload);
+      await wsService.send('format:json', { path: currentFile.path });
     } catch (error) {
       console.error('Failed to format JSON:', error);
     }
@@ -319,8 +310,7 @@ function App() {
   const handleMinifyJSON = useCallback(async () => {
     if (!currentFile) return;
     try {
-      const response = await wsService.send('format:json', { path: currentFile.path, minify: true });
-      console.log('Minified JSON:', response.payload);
+      await wsService.send('format:json', { path: currentFile.path, minify: true });
     } catch (error) {
       console.error('Failed to minify JSON:', error);
     }
@@ -329,8 +319,7 @@ function App() {
   const handleFormatXML = useCallback(async () => {
     if (!currentFile) return;
     try {
-      const response = await wsService.send('format:xml', { path: currentFile.path });
-      console.log('Formatted XML:', response.payload);
+      await wsService.send('format:xml', { path: currentFile.path });
     } catch (error) {
       console.error('Failed to format XML:', error);
     }
@@ -339,8 +328,7 @@ function App() {
   const handleMinifyXML = useCallback(async () => {
     if (!currentFile) return;
     try {
-      const response = await wsService.send('format:xml', { path: currentFile.path, minify: true });
-      console.log('Minified XML:', response.payload);
+      await wsService.send('format:xml', { path: currentFile.path, minify: true });
     } catch (error) {
       console.error('Failed to minify XML:', error);
     }
@@ -379,14 +367,6 @@ function App() {
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [handleFileOpenDialog, activeTabId, handleFileClose, handleFileReload, handleNewFile, handleSaveFile, handleSaveFileAs]);
-
-  const handleContentChange = useCallback((tabId: string, content: string) => {
-    setEditorContent(prev => ({ ...prev, [tabId]: content }));
-  }, []);
-
-  const handleTextSelect = (text: string) => {
-    setSelectedText(text);
-  };
 
   return (
     <div className="app">
@@ -431,41 +411,21 @@ function App() {
           🔄 重新加载
         </button>
         <div className="toolbar-separator" />
-        <button
-          className="toolbar-button"
-          onClick={handleFormatJSON}
-          disabled={!currentFile}
-          title="格式化 JSON"
-        >
+        <button className="toolbar-button" onClick={handleFormatJSON} disabled={!currentFile} title="格式化 JSON">
           { } 格式化
         </button>
-        <button
-          className="toolbar-button"
-          onClick={handleMinifyJSON}
-          disabled={!currentFile}
-          title="压缩 JSON"
-        >
+        <button className="toolbar-button" onClick={handleMinifyJSON} disabled={!currentFile} title="压缩 JSON">
           { } 压缩
         </button>
         <div className="toolbar-separator" />
-        <button
-          className="toolbar-button"
-          onClick={() => setSidebarOpen(!sidebarOpen)}
-        >
+        <button className="toolbar-button" onClick={() => setSidebarOpen(!sidebarOpen)}>
           {sidebarOpen ? '◀' : '▶'} 侧边栏
         </button>
-        <button
-          className="toolbar-button"
-          onClick={() => setRightPanelOpen(!rightPanelOpen)}
-        >
+        <button className="toolbar-button" onClick={() => setRightPanelOpen(!rightPanelOpen)}>
           {rightPanelOpen ? '▶' : '◀'} 面板
         </button>
         <div className="toolbar-separator" />
-        <button
-          className="toolbar-button"
-          onClick={() => setSettingsOpen(true)}
-          title="设置"
-        >
+        <button className="toolbar-button" onClick={() => setSettingsOpen(true)} title="设置">
           ⚙ 设置
         </button>
       </div>

@@ -39,6 +39,13 @@ const (
 	MsgAutoSaveRestore  MessageType = "autosave:restore"
 	MsgAutoSaveUpdate   MessageType = "autosave:update"
 	MsgSearchReplace    MessageType = "search:replace"
+	// Session API
+	MsgSessionGet      MessageType = "session:get"
+	MsgSessionUpdate   MessageType = "session:update"
+	MsgSessionAddFile  MessageType = "session:addFile"
+	MsgSessionRemoveFile MessageType = "session:removeFile"
+	MsgSessionUpdateFile MessageType = "session:updateFile"
+	MsgSessionSetActive MessageType = "session:setActive"
 )
 
 type Message struct {
