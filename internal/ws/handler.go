@@ -41,6 +41,7 @@ const (
 	MsgSearchReplace    MessageType = "search:replace"
 	// Session API
 	MsgSessionGet      MessageType = "session:get"
+	MsgSessionCreate   MessageType = "session:create"
 	MsgSessionUpdate   MessageType = "session:update"
 	MsgSessionAddFile  MessageType = "session:addFile"
 	MsgSessionRemoveFile MessageType = "session:removeFile"

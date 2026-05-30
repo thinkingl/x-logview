@@ -556,6 +556,29 @@ func registerHandlers(
 		conn.SendResponse(msg.ID, ws.MsgSessionGet, session)
 	})
 
+	hub.Handle(ws.MsgSessionCreate, func(conn *ws.Client, msg ws.Message) {
+		var req struct {
+			ID   string `json:"id"`
+			Name string `json:"name"`
+		}
+		if err := json.Unmarshal(msg.Payload, &req); err != nil {
+			conn.SendError(msg.ID, err)
+			return
+		}
+
+		if err := sqliteStore.CreateSession(req.ID, req.Name); err != nil {
+			conn.SendError(msg.ID, err)
+			return
+		}
+
+		if err := sqliteStore.SetActiveSession(req.ID); err != nil {
+			conn.SendError(msg.ID, err)
+			return
+		}
+
+		conn.SendResponse(msg.ID, ws.MsgSessionCreate, map[string]string{"status": "created"})
+	})
+
 	hub.Handle(ws.MsgSessionUpdate, func(conn *ws.Client, msg ws.Message) {
 		var req struct {
 			ID   string `json:"id"`
